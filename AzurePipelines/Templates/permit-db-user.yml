@@ -1,0 +1,101 @@
+parameters:
+- name: accessGroup
+  type: string
+- name: sqlServerName
+  type: string
+- name: sqlDatabaseName
+  type: string
+- name: webAppName
+  type: string
+
+jobs:
+- job: PermitAAD
+  steps:
+  - task: SqlAzureDacpacDeployment@1
+    continueOnError: true   
+    inputs:
+      azureSubscription: $(azureServicePrincipal)
+      AuthenticationType: 'servicePrincipal'
+      ServerName: ${{ parameters.sqlServerName }}
+      DatabaseName: 'master'
+      deployType: 'InlineSqlTask'
+      SqlInline: |
+        IF NOT EXISTS (SELECT * FROM master.sys.server_principals WHERE [name] = '${{ parameters.accessGroup }}' )
+        BEGIN
+          CREATE LOGIN [${{ parameters.accessGroup }}] FROM EXTERNAl PROVIDER;
+        END
+        GO
+        IF USER_ID('${{ parameters.accessGroup }}') IS NULL
+        Begin
+          CREATE User [${{ parameters.accessGroup }}] FROM EXTERNAL PROVIDER;
+        end
+        GO
+      IpDetectionMethod: 'AutoDetect'
+
+  - task: SqlAzureDacpacDeployment@1
+    condition: ne('${{ parameters.sqlDatabaseName }}', '')
+    continueOnError: true   
+    inputs:
+      azureSubscription: $(azureServicePrincipal)
+      AuthenticationType: 'servicePrincipal'
+      ServerName: ${{ parameters.sqlServerName }}
+      DatabaseName: ${{ parameters.sqlDatabaseName }}
+      deployType: 'InlineSqlTask'
+      SqlInline: |
+        IF USER_ID('${{ parameters.accessGroup }}') IS NULL
+        Begin
+          CREATE User [${{ parameters.accessGroup }}] FROM EXTERNAL PROVIDER;
+        End
+        GO
+        ALTER ROLE db_datareader ADD MEMBER [${{ parameters.accessGroup }}];
+        ALTER ROLE db_datawriter ADD MEMBER [${{ parameters.accessGroup }}];
+        ALTER ROLE db_ddladmin ADD MEMBER [${{ parameters.accessGroup }}];
+      IpDetectionMethod: 'AutoDetect'
+
+  - task: SqlAzureDacpacDeployment@1
+    continueOnError: true 
+    inputs:
+      azureSubscription: $(azureServicePrincipal)
+      AuthenticationType: 'servicePrincipal'
+      ServerName: ${{ parameters.sqlServerName }}
+      DatabaseName: ${{ parameters.sqlDatabaseName }}
+      deployType: 'InlineSqlTask'
+      SqlInline: |
+        BEGIN
+          --Creating user
+          IF USER_ID('${{ parameters.webAppName }}') IS NULL
+          Begin
+            CREATE User [${{ parameters.webAppName }}] FROM EXTERNAL PROVIDER;
+          end
+            -- Granting permissions
+          ALTER ROLE db_datareader ADD MEMBER [${{ parameters.webAppName }}];
+          ALTER ROLE db_datawriter ADD MEMBER [${{ parameters.webAppName }}];
+          ALTER ROLE db_ddladmin ADD MEMBER [${{ parameters.webAppName }}];
+        END
+      IpDetectionMethod: 'AutoDetect' 
+
+
+##  special case that we run the table creation but normally we do this be using other tools like DBMS
+  - task: SqlAzureDacpacDeployment@1
+    continueOnError: true 
+    inputs:
+      azureSubscription: $(azureServicePrincipal)
+      AuthenticationType: 'servicePrincipal'
+      ServerName: ${{ parameters.sqlServerName }}
+      DatabaseName: ${{ parameters.sqlDatabaseName }}
+      deployType: 'InlineSqlTask'
+      SqlInline: |
+        BEGIN
+          --Creating table
+          IF OBJECT_ID('dbo.Student', 'U') IS NULL 
+          BEGIN
+            CREATE TABLE [dbo].[Student] (
+              [id]   INT            IDENTITY (1, 1) NOT NULL,
+              [Name] NVARCHAR (MAX) NULL,
+              [Age]  INT            NOT NULL,
+              [City] NVARCHAR (MAX) NULL,
+              CONSTRAINT [PK_Student] PRIMARY KEY CLUSTERED ([id] ASC)
+            );
+          END
+        END
+      IpDetectionMethod: 'AutoDetect'

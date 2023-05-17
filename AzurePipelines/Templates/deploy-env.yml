@@ -1,0 +1,56 @@
+# expects a variable to exist for
+  # azureServicePrincipal
+  # terraformResourceGroup
+  # terraformStorageAccountName
+  # pipelineURI
+parameters:
+  - name: environment
+    type: string
+  - name: accessGroup
+    type: string
+
+stages:
+  - stage: ${{ parameters.environment }}
+    displayName: ${{ upper(parameters.environment) }}
+    jobs:
+    - deployment: Terraform
+      environment: ${{ upper(parameters.environment) }}
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - template: deploy-terraform.yml
+              parameters:
+                terraformFolder: $(terraformFolder)
+                environment: ${{ parameters.environment }}
+                containerName: $(terraformContainerName)
+                commandOptionsArguements: >
+                  -var-file="environments/${{ parameters.environment }}.tfvars" 
+                  -var="privilegedUsers=${{ parameters.accessGroup }}"
+                    
+            - task: AzureWebAppContainer@1
+              displayName: 'Deploy web app'
+              inputs:
+                azureSubscription: $(azureServicePrincipal)
+                appName: $(terraformOutput.APIAppName)
+                containers: $(orgnaizaionalAcr):latest 
+
+  - stage: DB${{ parameters.environment }}
+    displayName: '${{ upper(parameters.environment) }} DB Deploy'
+    dependsOn: ${{ parameters.environment }}
+    pool:
+      name: Azure Pipelines
+      vmImage: 'windows-latest'
+    variables: 
+      sqlServerName: $[ stageDependencies.${{ parameters.environment }}.Terraform.outputs['Terraform.terraformOutput.dbServer'] ]
+      sqlDatabaseName: $[ stageDependencies.${{ parameters.environment }}.Terraform.outputs['Terraform.terraformOutput.dbName'] ]
+      APIAppName: $[ stageDependencies.${{ parameters.environment }}.Terraform.outputs['Terraform.terraformOutput.APIAppName'] ]
+    jobs:
+      - template: permit-db-user.yml
+        parameters:
+          accessGroup: ${{ parameters.accessGroup }}
+          sqlServerName: $(sqlServerName)
+          sqlDatabaseName: $(sqlDatabaseName)
+          webAppName: $(APIAppName)
+                    

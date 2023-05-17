@@ -1,0 +1,33 @@
+# Build.BuildId and azureServicePrincipal
+parameters:
+  - name: folder
+    type: string
+
+steps:
+- task: DockerInstaller@0
+  displayName: Installing
+  inputs:
+    dockerVersion: '17.09.0-ce'
+
+- task: Docker@2
+  displayName: Docker Build
+  inputs:
+    command: build
+    containerRegistry: $(acrsc)
+    repository: ${{ lower(parameters.folder) }}
+    Dockerfile: '${{ parameters.folder }}/Dockerfile'
+    tags: |
+      $(Build.BuildId)
+      latest
+
+- task: Docker@2
+  displayName: Docker Push
+  inputs:
+    command: push
+    containerRegistry: $(acrsc)
+    repository: ${{ lower(parameters.folder) }}
+    Dockerfile: '${{ parameters.folder }}/Dockerfile'
+    tags: |
+      $(Build.BuildId)
+      latest
+
